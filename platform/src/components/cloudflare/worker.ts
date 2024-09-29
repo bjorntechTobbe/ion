@@ -20,6 +20,7 @@ import { Permission } from "../aws/permission.js";
 import { Binding, binding } from "./binding.js";
 import { DEFAULT_ACCOUNT_ID } from "./account-id.js";
 import { rpc } from "../rpc/rpc.js";
+import { DurableObjectNamespace } from "./providers/worker-do";
 
 export interface WorkerArgs {
   /**
@@ -167,6 +168,12 @@ export interface WorkerArgs {
    * Placehodler for future feature.
    */
   dev?: boolean;
+  /**
+   * Durable Objects to create for this worker.
+   */
+  durableObjects?: {
+    [key: string]: string;
+  };
 }
 
 /**
@@ -233,6 +240,7 @@ export class Worker extends Component implements Link.Linkable {
   private script: Output<cf.WorkerScript>;
   private workerUrl: WorkerUrl;
   private workerDomain?: cf.WorkerDomain;
+  public durableObjects: { [key: string]: DurableObjectNamespace } = {};
 
   constructor(name: string, args: WorkerArgs, opts?: ComponentResourceOptions) {
     super(__pulumiType, name, args, opts);
@@ -311,6 +319,18 @@ export class Worker extends Component implements Link.Linkable {
         handler: args.handler,
       },
     });
+
+    // Create Durable Object namespaces
+    if (args.durableObjects) {
+      for (const [doName, doClass] of Object.entries(args.durableObjects)) {
+        this.durableObjects[doName] = new DurableObjectNamespace(`${name}-do-${doName}`, {
+          accountId: DEFAULT_ACCOUNT_ID,
+          name: interpolate`${name}-${doName}`,
+          script: name,
+          class: doClass,
+        }, { parent });
+      }
+    }
 
     function normalizeDev() {
       return output(args.dev).apply((v) => $dev && v !== false);
