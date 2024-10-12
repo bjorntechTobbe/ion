@@ -6,6 +6,7 @@ import {
   output,
   asset as pulumiAsset,
   Input,
+  all,
 } from "@pulumi/pulumi";
 import { physicalName } from "./naming.js";
 import { VisibleError } from "./error.js";
@@ -55,9 +56,9 @@ export class Component extends ComponentResource {
     opts?: ComponentResourceOptions,
     _versionInfo: {
       _version: number;
-      _message?: string;
+      _message: string;
       _forceUpgrade?: `v${number}`;
-    } = { _version: 1 },
+    } = { _version: 1, _message: "" },
   ) {
     const transforms = ComponentTransforms.get(type) ?? [];
     for (const transform of transforms) {
@@ -92,6 +93,7 @@ export class Component extends ComponentResource {
             args.type === "pulumi-nodejs:dynamic:Resource" ||
             args.type === "random:index/randomId:RandomId" ||
             args.type === "random:index/randomPassword:RandomPassword" ||
+            args.type === "tls:index/privateKey:PrivateKey" ||
             // resources manually named
             [
               "aws:appsync/dataSource:DataSource",
@@ -148,6 +150,8 @@ export class Component extends ComponentResource {
               "aws:lambda/permission:Permission",
               "aws:lambda/provisionedConcurrencyConfig:ProvisionedConcurrencyConfig",
               "aws:lb/listener:Listener",
+              "aws:rds/proxyDefaultTargetGroup:ProxyDefaultTargetGroup",
+              "aws:rds/proxyTarget:ProxyTarget",
               "aws:route53/record:Record",
               "aws:s3/bucketCorsConfigurationV2:BucketCorsConfigurationV2",
               "aws:s3/bucketNotification:BucketNotification",
@@ -157,6 +161,7 @@ export class Component extends ComponentResource {
               "aws:s3/bucketPublicAccessBlock:BucketPublicAccessBlock",
               "aws:s3/bucketVersioningV2:BucketVersioningV2",
               "aws:s3/bucketWebsiteConfigurationV2:BucketWebsiteConfigurationV2",
+              "aws:secretsmanager/secretVersion:SecretVersion",
               "aws:ses/domainIdentityVerification:DomainIdentityVerification",
               "aws:sesv2/emailIdentity:EmailIdentity",
               "aws:sns/topicSubscription:TopicSubscription",
@@ -164,6 +169,7 @@ export class Component extends ComponentResource {
               "cloudflare:index/workerDomain:WorkerDomain",
               "docker-build:index:Image",
               "vercel:index/dnsRecord:DnsRecord",
+              "cloudflare:index/workerCronTrigger:WorkerCronTrigger",
             ].includes(args.type)
           )
             return;
@@ -177,12 +183,20 @@ export class Component extends ComponentResource {
               cb: () => physicalName(24, args.name),
             },
             {
+              types: ["aws:rds/proxy:Proxy"],
+              field: "name",
+              cb: () => physicalName(60, args.name).toLowerCase(),
+            },
+            {
               types: ["aws:rds/cluster:Cluster"],
               field: "clusterIdentifier",
               cb: () => physicalName(63, args.name).toLowerCase(),
             },
             {
-              types: ["aws:rds/clusterInstance:ClusterInstance"],
+              types: [
+                "aws:rds/clusterInstance:ClusterInstance",
+                "aws:rds/instance:Instance",
+              ],
               field: "identifier",
               cb: () => physicalName(63, args.name).toLowerCase(),
             },
@@ -250,10 +264,16 @@ export class Component extends ComponentResource {
             {
               types: [
                 "aws:elasticache/subnetGroup:SubnetGroup",
+                "aws:rds/parameterGroup:ParameterGroup",
                 "aws:rds/subnetGroup:SubnetGroup",
               ],
               field: "name",
               cb: () => physicalName(255, args.name).toLowerCase(),
+            },
+            {
+              types: ["aws:ec2/keyPair:KeyPair"],
+              field: "keyName",
+              cb: () => physicalName(255, args.name),
             },
             {
               types: [
@@ -281,6 +301,11 @@ export class Component extends ComponentResource {
                 output(args.props.fifoTopic).apply((fifo) =>
                   physicalName(256, args.name, fifo ? ".fifo" : undefined),
                 ),
+            },
+            {
+              types: ["aws:secretsmanager/secret:Secret"],
+              field: "name",
+              cb: () => physicalName(512, args.name),
             },
             {
               types: ["aws:appsync/graphQLApi:GraphQLApi"],
@@ -364,19 +389,14 @@ export class Component extends ComponentResource {
       }
       // Version upgraded without forceUpgrade
       if (oldVersion < newVersion && !_versionInfo._forceUpgrade) {
-        throw new VisibleError(
-          [
-            `There is a new version of "${className}" that has breaking changes.`,
-            ...(_versionInfo._message ? [_versionInfo._message] : []),
-          ].join("\n"),
-        );
+        throw new VisibleError(_versionInfo._message);
       }
       // Version downgraded
       if (oldVersion > newVersion) {
         throw new VisibleError(
           [
             `It seems you are trying to use an older version of "${className}".`,
-            `You need to recreate this component to rollback - https://ion.sst.dev/docs/components/#versioning`,
+            `You need to recreate this component to rollback - https://sst.dev/docs/components/#versioning`,
           ].join("\n"),
         );
       }
@@ -435,8 +455,8 @@ export function $lazy<T>(fn: () => T) {
     .apply((x) => x);
 }
 
-export function $print(...msg: Input<string>[]) {
-  return output(msg).apply((msg) => console.log(...msg));
+export function $print(...msg: Input<any>[]) {
+  return all(msg).apply((msg) => console.log(...msg));
 }
 
 export class Version extends ComponentResource {
