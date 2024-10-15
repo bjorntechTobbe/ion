@@ -436,7 +436,7 @@ export interface FunctionArgs {
    * [Link resources](/docs/linking/) to your function. This will:
    *
    * 1. Grant the permissions needed to access the resources.
-   * 2. Allow you to access it in your site using the [SDK](/docs/reference/sdk/).
+   * 2. Allow you to access it in your function using the [SDK](/docs/reference/sdk/).
    *
    * @example
    *
@@ -1304,7 +1304,8 @@ export class Function extends Component implements Link.Linkable {
         dev,
         bootstrapData,
         Function.encryptionKey().base64,
-      ]).apply(([environment, dev, bootstrap, key]) => {
+        args.bundle,
+      ]).apply(([environment, dev, bootstrap, key, bundle]) => {
         const result = environment ?? {};
         result.SST_RESOURCE_App = JSON.stringify({
           name: $app.name,
@@ -1484,13 +1485,6 @@ export class Function extends Component implements Link.Linkable {
           };
         }
 
-        if (args.bundle) {
-          return {
-            bundle: output(args.bundle),
-            handler: output(args.handler),
-          };
-        }
-
         const buildResult = buildInput.apply(async (input) => {
           const result = await rpc.call<{
             handler: string;
@@ -1534,20 +1528,8 @@ export class Function extends Component implements Link.Linkable {
           }
 
           const hasUserInjections = injections.length > 0;
-          // already injected via esbuild when bundle is undefined
-          const hasLinkInjections = args.bundle && linkData.length > 0;
 
-          if (!hasUserInjections && !hasLinkInjections) return { handler };
-
-          const linkInjection = hasLinkInjections
-            ? linkData
-                .map((item) => [
-                  `process.env["SST_RESOURCE_${item.name}"] = ${JSON.stringify(
-                    JSON.stringify(item.properties),
-                  )};\n`,
-                ])
-                .join("")
-            : "";
+          if (!hasUserInjections) return { handler };
 
           const parsed = path.posix.parse(handler);
           const handlerDir = parsed.dir;
@@ -1567,6 +1549,18 @@ export class Function extends Component implements Link.Linkable {
               `Could not find handler file "${handler}" for function "${name}"`,
             );
 
+          const split = injections.reduce(
+            (acc, item) => {
+              if (item.startsWith("outer:")) {
+                acc.outer.push(item.substring("outer:".length));
+                return acc;
+              }
+              acc.inner.push(item);
+              return acc;
+            },
+            { outer: [] as string[], inner: [] as string[] },
+          );
+
           return {
             handler: path.posix.join(
               handlerDir,
@@ -1576,17 +1570,17 @@ export class Function extends Component implements Link.Linkable {
               name: path.posix.join(handlerDir, `${newHandlerFileName}.mjs`),
               content: streaming
                 ? [
-                    linkInjection,
+                    ...split.outer,
                     `export const ${newHandlerFunction} = awslambda.streamifyResponse(async (event, responseStream, context) => {`,
-                    ...injections,
+                    ...split.inner,
                     `  const { ${oldHandlerFunction}: rawHandler} = await import("./${oldHandlerFileName}${newHandlerFileExt}");`,
                     `  return rawHandler(event, responseStream, context);`,
                     `});`,
                   ].join("\n")
                 : [
-                    linkInjection,
+                    ...split.outer,
                     `export const ${newHandlerFunction} = async (event, context) => {`,
-                    ...injections,
+                    ...split.inner,
                     `  const { ${oldHandlerFunction}: rawHandler} = await import("./${oldHandlerFileName}${newHandlerFileExt}");`,
                     `  return rawHandler(event, context);`,
                     `};`,

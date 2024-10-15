@@ -13,8 +13,10 @@ export default $config({
 
     const vpc = addVpc();
     const bucket = addBucket();
+    //const apiv2 = addApiV2();
     //const app = addFunction();
     //const service = addService();
+    //const postgres = addPostgres();
     //const cron = addCron();
 
     return ret;
@@ -41,6 +43,16 @@ export default $config({
       return cron;
     }
 
+    function addApiV2() {
+      const api = new sst.aws.ApiGatewayV2("MyApiV2", {
+        link: [bucket],
+      });
+      api.route("GET /", {
+        handler: "functions/apiv2/index.handler",
+      });
+      return api;
+    }
+
     function addFunction() {
       const app = new sst.aws.Function("MyApp", {
         handler: "functions/handler-example/index.handler",
@@ -65,6 +77,17 @@ export default $config({
       ret.service = service.url;
 
       return service;
+    }
+
+    function addPostgres() {
+      const postgres = new sst.aws.Postgres("MyPostgres", {
+        vpc,
+      });
+      ret.pgHost = postgres.host;
+      ret.pgPort = postgres.port;
+      ret.pgUsername = postgres.username;
+      ret.pgPassword = postgres.password;
+      return postgres;
     }
   },
 });
